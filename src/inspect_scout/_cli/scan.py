@@ -21,6 +21,7 @@ from inspect_ai.model import (
 )
 from typing_extensions import Unpack
 
+from inspect_scout._findings.spec import select_findings
 from inspect_scout._project._project import read_project
 from inspect_scout._validation import validation_set
 from inspect_scout._validation.predicates import PREDICATES, ValidationPredicate
@@ -94,6 +95,12 @@ class ScanGroup(click.Group):
         # This allows: scout scan file.py -T ./logs to work correctly
         file_args = []
         option_args = []
+        value_options = {
+            option
+            for parameter in self.get_params(ctx)
+            if isinstance(parameter, click.Option) and not parameter.is_flag
+            for option in parameter.opts
+        }
         i = 0
         while i < len(normalized_args):
             arg = normalized_args[i]
@@ -102,7 +109,11 @@ class ScanGroup(click.Group):
                 option_args.append(arg)
                 i += 1
                 # For options that take values, check if next arg exists and is not a flag
-                if i < len(normalized_args) and not normalized_args[i].startswith("-"):
+                if (
+                    arg in value_options
+                    and i < len(normalized_args)
+                    and not normalized_args[i].startswith("-")
+                ):
                     option_args.append(normalized_args[i])
                     i += 1
             else:
@@ -394,6 +405,21 @@ dry_run_option = click.option(
 
 
 SCAN_OPTIONS: list[Callable[..., Any]] = [
+    click.option(
+        "--findings",
+        default=None,
+        help="Findings to include: all, or comma-separated slugs (default: none). Without FILE, the named findings run alone.",
+    ),
+    click.option(
+        "--findings-model",
+        default=None,
+        help="Override the model for finding scanners.",
+    ),
+    click.option(
+        "--findings-bundle",
+        is_flag=True,
+        help="Answer selected findings together in each request.",
+    ),
     scanjob_args_option,
     transcripts_option,
     filter_option,
@@ -452,6 +478,9 @@ def scan_options(func: F) -> F:
 @click.pass_context
 def scan_command(
     ctx: click.Context,
+    findings: str | None,
+    findings_model: str | None,
+    findings_bundle: bool,
     s: tuple[str, ...],
     transcripts: tuple[str, ...],
     filter: tuple[str, ...],
@@ -512,17 +541,31 @@ def scan_command(
     if scans is None:
         scans = DEFAULT_SCANS_DIR
 
-    # Get the file argument from extra args
-    if not ctx.args or len(ctx.args) == 0:
+    project = read_project()
+    # scan() adds the finding scanners; the CLI resolves the same selection only to
+    # validate it and to summarize each finding afterwards.
+    try:
+        selected = select_findings(findings)
+    except ValueError as ex:
+        raise click.UsageError(str(ex)) from ex
+    if findings_bundle and not selected:
+        raise click.UsageError("--findings-bundle requires at least one finding")
+
+    # Resolve a file only when supplied; findings can constitute the entire job.
+    if not ctx.args and not selected:
         raise click.UsageError("Missing argument 'FILE'.")
-    file = ctx.args[0]
+    file = ctx.args[0] if ctx.args else None
 
     # resolve scanjobs
     scanjob_args = parse_cli_args(s)
 
     # see if it is a package reference
-    scanjob = scanjob_from_cli_spec(file, scanjob_args)
-    if scanjob is None:
+    scanjob = (
+        scanjob_from_cli_spec(file, scanjob_args)
+        if file is not None
+        else ScanJob(scanners=[])
+    )
+    if scanjob is None and file is not None:
         # now check for a scanjob file (.py or .yaml)
         scanjob = scanjob_from_file(file, scanjob_args)
         if scanjob is None:
@@ -536,16 +579,17 @@ def scan_command(
                 scanjob = ScanJob(transcripts=None, scanners=scanners)
 
     # need to resolve project against scanjob here so it can override env vars
-    merge_project_into_scanjob(read_project(), scanjob)
+    assert scanjob is not None
+    merge_project_into_scanjob(project, scanjob)
 
-    # resolve transcripts from cli/env (apply filter)
+    # Filters apply to the resolved source, including project and job sources.
     tx = transcripts_from(transcripts) if len(transcripts) > 0 else None
-    if tx is not None:
-        for f in filter:
-            tx = tx.where(f)
 
     # tx might have been from env so enable it to be overridden by project/scanjob
     tx = resolve_scan_option(ctx, "transcripts", tx, scanjob.transcripts)
+    if tx is not None:
+        for f in filter:
+            tx = tx.where(f)
 
     # resolve some options
     scans = resolve_scan_option(ctx, "scans", scans, scanjob.scans)
@@ -706,6 +750,19 @@ def scan_command(
     )
 
     # run scan
+    from inspect_scout._findings.derive import derive_finding
+
+    from .findings import print_finding_summary
+
+    before = {
+        spec.slug: {
+            (exhibit.transcript_id, exhibit.message_id)
+            for exhibit in derive_finding(spec, project).exhibits
+            if exhibit.verified_ref is not None
+        }
+        for spec in selected
+        if not dry_run
+    }
     status = scan(
         scanners=scanjob,
         transcripts=tx,
@@ -724,10 +781,43 @@ def scan_command(
         results_buffer=scan_results_buffer,
         tags=scan_tags,
         metadata=scan_metadata,
+        findings=[spec.slug for spec in selected],
+        findings_model=findings_model,
+        findings_bundle=findings_bundle,
         fail_on_error=common["fail_on_error"],
         log_level=scan_log_level,
         dry_run=dry_run,
     )
+    if not dry_run:
+        for spec in selected:
+            view = derive_finding(spec, project)
+            sighted = [
+                exhibit
+                for exhibit in view.exhibits
+                if exhibit.verified_ref is not None
+                and any(s.scan_id == status.spec.scan_id for s in exhibit.sightings)
+            ]
+            known = sum(
+                (exhibit.transcript_id, exhibit.message_id) in before[spec.slug]
+                for exhibit in sighted
+            )
+            # A scanner label that differs from the exhibit's current label.
+            disagreements = sum(
+                any(
+                    s.scan_id == status.spec.scan_id
+                    and s.label is not None
+                    and s.label != exhibit.label
+                    for s in exhibit.sightings
+                )
+                for exhibit in sighted
+                if exhibit.label is not None
+            )
+            click.echo(
+                f"{spec.slug}: {len(sighted) - known} new located exhibits; "
+                f"{known} sightings of known messages; "
+                f"{disagreements} label disagreements"
+            )
+            print_finding_summary(view)
 
     # exit non-zero when the user asked us to fail on error and the scan
     # didn't complete cleanly

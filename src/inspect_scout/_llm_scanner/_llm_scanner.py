@@ -11,6 +11,7 @@ from inspect_ai.model import (
     Model,
     get_model,
 )
+from inspect_ai.model._model_info import get_model_info
 from inspect_ai.scorer import ValueToFloat
 from jinja2 import Environment
 
@@ -50,7 +51,9 @@ from .prompt import (
     DEFAULT_SCANNER_TEMPLATE_PREFIX,
     DEFAULT_SCANNER_TEMPLATE_SUFFIX,
 )
-from .types import AnswerSpec
+from .rendering import ScannerRendering
+from .structured import structured_schema
+from .types import AnswerSpec, AnswerStructured
 
 logger = getLogger(__name__)
 
@@ -142,6 +145,7 @@ def llm_scanner(
     depth: int | None = None,
     reducer: Callable[[list[Result]], Awaitable[Result]] | None = None,
     nonce: str | None = None,
+    rendering: ScannerRendering | None = None,
 ) -> Scanner[Transcript]: ...
 
 
@@ -168,6 +172,7 @@ def llm_scanner(
     depth: int | None = None,
     reducer: Callable[[list[Result]], Awaitable[Result]] | None = None,
     nonce: str | None = None,
+    rendering: ScannerRendering | None = None,
 ) -> Scanner[Transcript]: ...
 
 
@@ -194,6 +199,7 @@ def llm_scanner(
     depth: int | None = None,
     reducer: Callable[[list[Result]], Awaitable[Result]] | None = None,
     nonce: str | None = None,
+    rendering: ScannerRendering | None = None,
 ) -> Scanner[Transcript]:
     """Create a scanner that uses an LLM to scan transcripts.
 
@@ -207,6 +213,9 @@ def llm_scanner(
     unique message numbering (``[M1]``, ``[M2]``, ...) across all segments.
 
     Args:
+        rendering: Shared role filter, nonce, counting model, and fixed segment
+            budget. Opting in replaces individual rendering settings and fails
+            on oversized prompts rather than changing segment boundaries.
         question: Question for the scanner to answer.
             Can be a static string (e.g., "Did the assistant refuse the request?") or a function that takes a Transcript and returns an string for dynamic questions based on transcript content. Can be omitted if you provide a custom template.
         answer: Specification of the answer format.
@@ -304,6 +313,14 @@ def llm_scanner(
         A ``Scanner`` function that analyzes Transcript instances and returns
         ``Result`` (single segment) or ``list[Result]`` (multiple segments).
     """
+    if rendering is not None:
+        if preprocessor is not None or timeline is not None or depth is not None:
+            raise ValueError(
+                "Shared rendering cannot be combined with a preprocessor, timeline, or depth"
+            )
+        context_window = rendering.context_window
+        nonce = rendering.nonce
+        content = TranscriptContent(messages=rendering.messages)
     check_nonce(nonce)
 
     # Resolve template form once at factory time.
@@ -363,6 +380,18 @@ def llm_scanner(
 
         # Resolve the model once — defers role resolution to scan time
         resolved_model = get_model(model, role=model_role)
+        counting_model = (
+            get_model(rendering.model)
+            if rendering is not None and rendering.model is not None
+            else resolved_model
+        )
+        tool_tokens = (
+            await resolved_model.count_tokens(
+                structured_schema(answer).model_dump_json()
+            )
+            if rendering is not None and isinstance(answer, AnswerStructured)
+            else 0
+        )
 
         # On the streaming path, template rendering only needs TranscriptInfo
         # fields, so pass a content-empty Transcript where one is required.
@@ -387,9 +416,9 @@ def llm_scanner(
 
         # Shared numbering scope across all segments
         messages_as_str_fn, extract_references = message_numbering(
-            preprocessor=cast(
-                MessagesPreprocessor[list[ChatMessage]] | None, preprocessor
-            ),
+            preprocessor=rendering.preprocessor()
+            if rendering is not None
+            else cast(MessagesPreprocessor[list[ChatMessage]] | None, preprocessor),
             nonce=nonce,
         )
 
@@ -426,6 +455,22 @@ def llm_scanner(
                     nonce=nonce,
                 )
                 call_config = GenerateConfig(cache=cache) if cache is not None else None
+            if rendering is not None:
+                model_info = get_model_info(resolved_model)
+                window = min(
+                    rendering.context_window,
+                    model_info.input_tokens
+                    if model_info and model_info.input_tokens
+                    else rendering.context_window,
+                )
+                tokens = await resolved_model.count_tokens(prompt) + tool_tokens
+                # Keep a margin for provider framing not exposed by count_tokens.
+                if tokens > int(window * 0.95):
+                    raise ValueError(
+                        f"Shared rendering prompt exceeds the request budget: {tokens} "
+                        f"tokens, limit {int(window * 0.95)}. Shorten the question or "
+                        "increase the project's context_window; segments were not changed."
+                    )
             return await generate_answer(
                 prompt,
                 answer,
@@ -449,10 +494,11 @@ def llm_scanner(
             nonce=nonce,
             model=resolved_model,
         )
+        prompt_reserve: int | float = 0.2 if rendering is not None else template_tokens
         effective_budget = _effective_segment_budget(
-            model=resolved_model,
+            model=counting_model,
             context_window=context_window,
-            prompt_reserve=template_tokens,
+            prompt_reserve=prompt_reserve,
         )
         if effective_budget <= 0:
             raise RuntimeError(
@@ -466,16 +512,20 @@ def llm_scanner(
         # Factored out so the events-streaming fallback can reuse it after
         # materializing the handle.
         async def scan_materialized(source_transcript: Transcript) -> Result:
+            if rendering is not None:
+                source_transcript = source_transcript.model_copy(
+                    update={"events": [], "timelines": []}
+                )
             materialized_results = await _scan_segments_bounded(
                 transcript_messages(
                     source_transcript,
                     messages_as_str=messages_as_str_fn,
-                    model=resolved_model,
+                    model=counting_model,
                     context_window=context_window,
                     timeline=timeline,
                     compaction=compaction,
                     depth=depth,
-                    prompt_reserve=template_tokens,
+                    prompt_reserve=prompt_reserve,
                 ),
                 scan_segment,
             )
@@ -497,19 +547,19 @@ def llm_scanner(
                 segments = stream_timeline_messages(
                     handle,
                     messages_as_str=messages_as_str_fn,
-                    model=resolved_model,
+                    model=counting_model,
                     context_window=context_window,
                     compaction=compaction,
                     depth=depth,
-                    prompt_reserve=template_tokens,
+                    prompt_reserve=prompt_reserve,
                 )
             else:
                 segments = stream_segment_messages(
                     handle.messages(),
                     messages_as_str=messages_as_str_fn,
-                    model=resolved_model,
+                    model=counting_model,
                     context_window=context_window,
-                    prompt_reserve=template_tokens,
+                    prompt_reserve=prompt_reserve,
                 )
             try:
                 results = await _scan_segments_bounded(segments, scan_segment)

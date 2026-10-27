@@ -1,0 +1,306 @@
+---
+title: Findings
+---
+
+Findings are standing questions that run alongside a project's scanners. Their
+exhibits are derived from scan results, so a message found again gains another
+sighting instead of becoming a duplicate exhibit.
+
+## Register and scan
+
+In a Scout project, register a question and optional labels:
+
+```bash
+scout findings register unexpected-actions \
+  --prompt "Find actions outside the assigned task." \
+  --label attempted --label completed
+scout findings list
+scout scan --findings unexpected-actions --cache --batch
+scout findings show unexpected-actions
+```
+
+Registration writes `findings/<slug>/finding.yaml` and creates a persistent project
+nonce when one is absent. The spec stores the question, labels, creation time,
+and a SHA-256 hash of the question and labels.
+Updating the question creates a new coverage version; previous evidence remains
+available. Slugs may contain up to 47 lowercase letters, digits, and separating
+hyphens, so Scout can preserve each finding's full scanner name.
+
+A finding runs as its own scanner, `finding_<slug>`, and takes part in a scan only
+when that scan names it:
+
+```bash
+scout scan scanners.py --findings unexpected-actions,other-question  # alongside
+scout scan scanners.py --findings all                                # every finding
+scout scan --findings unexpected-actions                             # alone
+```
+
+The Python `scan()` function takes the same selection as
+`findings=["unexpected-actions", "other-question"]` or `findings="all"`. A scan
+without `--findings` (or with `--findings none`) runs no findings. A scanner file
+is optional when the scan names findings. A finding whose
+scanner the job already defines is not added again. `--findings-model`
+(`findings_model=`) overrides the finding model for that scan. `--findings-bundle`
+(`findings_bundle=True`) answers the selected questions together in one request
+per segment and attributes each item to its question.
+
+## Project settings
+
+```yaml
+transcripts: ./transcripts
+scans: ./scans
+findings:
+  model: anthropic/claude-haiku-5-5
+  context_window: 100000
+  messages: [assistant, user]
+nonce: k7Qm2xPz9Lw4
+```
+
+These are the finding defaults. Role filtering excludes tool-result messages;
+assistant tool-call arguments remain visible. The nonce is a rendering marker,
+not a secret, and is recorded in scan metadata.
+
+Finding scanners use the same message filter, counting model, nonce, and segment
+budget. Segmentation reserves 20% of the budget for questions and answer schemas,
+independently of each question's length. An oversized question fails with an
+overflow error rather than changing the shared segments. Other `llm_scanner`
+calls retain their usual rendering unless they opt into `ScannerRendering`.
+
+## Caching
+
+Finding scanners share one answer schema and byte-identical transcript prefixes.
+Provider caching is model-specific. Anthropic's cache prefix includes tools,
+then system instructions, then messages: a purpose scanner can share the prefix
+only when its tools and rendering also match. A scanner with different answer
+tools pays for its own prefix even when its transcript text is identical.
+
+Use `--cache` for free identical reruns through the local model cache and
+`--batch` for noninteractive work. Bundling uses a different answer schema and
+therefore a different provider prefix from individual finding scanners.
+
+Use the same local cache directory for the original run and its reruns. For
+example, set `INSPECT_CACHE_DIR=./cache` in the project directory before each run.
+A cached rerun still makes live `count_tokens` requests for segmentation and
+overflow checks, so it needs valid provider credentials and network access even
+when no new generation tokens are billed.
+
+Provider cache hits in batch jobs are best-effort. Concurrent requests can race
+the first cache write, and queues between sequential batches can outlast the
+default five-minute cache lifetime. Identical prefixes alone do not guarantee
+batch savings. Sequential non-batch finding scanners can reuse the prefix while
+it remains cached; bundling reads each segment once without depending on a
+cross-request cache hit. Check `scan_model_usage` to measure actual savings.
+
+## Exhibits and coverage
+
+A finding's exhibits come only from its own scanner, whether it runs alone
+(`scout scan --findings SLUG`) or alongside other scanners in any scan, and from
+human decisions on messages it did not cite. Messages cited by other scanners are
+not exhibits of a finding. Only scans in the project's scans directory contribute.
+
+`scout findings show SLUG` reads contributing scans from the project's scans
+directory. `--json` emits the complete derived view. No evidence is copied out
+of scans. Because a completed scan never changes, its derived contribution is
+computed once and stored in `findings/.derived/`, keyed by scan id; later
+derivations, including a freshly started `scout view`, read it from there.
+Deleting a file in that directory only causes it to be recomputed.
+
+Each item contains a quote of at most 200 characters and an explanation citing
+`[M<n>]`. Verification checks the quoted message as rendered by Scout, collapsing
+whitespace, ignoring letter case, treating straight and curly quotation marks and
+dashes alike, ignoring markdown emphasis and code markers and punctuation at the
+ends of an excerpt, and matching excerpts separated by `...` in order. A mismatched cite
+is relocated when its quote appears elsewhere. Multiple matches are resolved by
+distance from the cited message, with the earlier message breaking an equal-distance
+tie. The view preserves both the original claim and the verified message id.
+
+Located items are grouped by message id within each transcript. Each exhibit
+retains the first quote, reason, and label, plus sightings identified by scan,
+scanner, model, and label. Deleting a scan removes its contribution. Unfindable
+quotes are explicitly `unlocated` and use a stable key made from the finding,
+transcript, normalized quote, and cited message ID when supplied. Identical reruns
+add sightings to the same unlocated exhibit. Per-result UUIDs remain in sightings;
+verdicts written against older UUID-based keys resolve to the stable identity
+without rewriting the ledger. When a quote that was unlocated is later located
+(for example after verification learns to ignore a typographic difference),
+verdicts recorded against its unlocated key follow it to the located message.
+
+After a scan, the summary for each finding reports new located exhibits,
+sightings of known messages, label disagreements (a scanner label that differs
+from the exhibit's current label), relocated and unlocated results, coverage, and
+agreement.
+
+Coverage is keyed by prompt hash and transcript: `judged` includes successful
+empty answers, `partial` includes unparsed or refused segments, and `missing`
+means no completed result is available. Finding scanners make one attempt per
+request: a refusal is reported as partial coverage rather than retried, because
+an identical request is usually refused again and every attempt is billed.
+Coverage reports what was examined; it does not select the next scan's inputs.
+
+## Review and verdicts
+
+```bash
+scout findings review unexpected-actions
+scout findings review unexpected-actions --all
+scout findings status
+```
+
+Review shows the agent, Scout's `[M<n>]` numbering and the original message index,
+quote, explanation, proposing scanners and models, sightings, and a message link.
+The default queue includes proposed and unlocated exhibits. `--all` includes
+previous decisions. An unlocated exhibit's quote matches no message, so it
+accepts only `r`, `s` and `q`: it can be rejected, not confirmed. The review session's end refreshes `answer.md`, including its
+synthesis.
+
+| Command | Action |
+| --- | --- |
+| `c` | Confirm |
+| `r` | Reject |
+| `l LABEL` | Confirm with an allowed label |
+| `s` | Skip |
+| `o` | Open the message in Scout View |
+| `q` | End the session |
+
+Each decision appends a row to `findings/SLUG/verdicts.jsonl`: `message_id`,
+`verdict`, `label`, `decided_by`, `reason`, `source`, and `added`. Human decisions
+use the current operating-system username. The latest human row takes precedence
+over every judge row; otherwise the latest judge row applies. Without a verdict,
+an exhibit is proposed. Rescanning cannot override a rejection. Ledgers written by
+older versions may contain rows with a retired verdict value; they are ignored on
+load, and `status` prints a one-line warning naming the file. Relabeling is a confirmation
+with a replacement label. Proposed exhibits await review, and rejected exhibits
+remain visible; neither counts as evidence. The evidence
+set is exactly the **confirmed** exhibits, so a finding has no answer until you
+confirm at least one exhibit.
+
+The Python ledger helper `append_verdict` also accepts human decisions with
+`source="manual"` for uncited message IDs. The derived view resolves those IDs
+against project transcripts. An unlocated exhibit has no message link.
+
+Links default to `http://localhost:7576`. Set `SCOUT_VIEW_URL` to your viewer's
+base URL when using another host or port. Links encode the transcript collection
+and original message ID; the displayed message numbers are not link identifiers.
+
+## Judge pending exhibits
+
+```bash
+scout findings judge unexpected-actions
+scout findings judge unexpected-actions --only all --model MODEL --limit 50
+```
+
+Your confirmations and rejections tune a judge that decides pending exhibits for
+you. `judge` confirms or rejects each located `proposed` exhibit. With `--only
+all` it also re-decides exhibits the judge decided earlier. It never re-judges an
+exhibit a human decided: a human decision stands until a human changes it, and a
+later human click overrides any judge decision. `--limit N` judges the first N
+candidates in transcript order, and `--model` overrides the finding model.
+
+For each exhibit the judge reads:
+
+- the finding's question and labels;
+- the exhibit's message with up to six preceding visible messages, using the
+  project's rendering nonce and message numbering;
+- the scanner's quote, reason and label;
+- as worked examples, up to eight confirmed and eight rejected exhibits of the
+  same finding that a human decided, nearest first (same agent, then closest
+  message), each with its quote, label, the scanner's reason and the reviewer's
+  reason.
+
+It answers confirmed or rejected, a label when the finding has labels, and a
+one-sentence reason. Each decision appends a `judge:<model>` row with source
+`judge`; judge-confirmed exhibits count as evidence like human-confirmed ones. The
+run then refreshes `answer.md`, including its synthesis, and prints the counts,
+the paid tokens and their cost.
+
+Each candidate is one model call, sent concurrently and cached locally, so an
+identical rerun is free. The judge makes one attempt per request. A refusal
+writes no verdict: the exhibit stays pending, and the run's refusal count is
+stored in `findings/SLUG/judge_runs.jsonl`. `status`, the Findings tab and
+`answer.md` report "N refused by judge" from the last run. An unparsed answer,
+an invalid label or a failed request leaves only its own exhibit pending and is
+counted as failed.
+
+Whether to trust the judge on a finding is measured, not assumed. `status`, the
+Findings tab and `answer.md` report "judge agreement: kept K of N human-reviewed
+judge decisions": of the exhibits with a judge decision that a human decided
+afterwards, how many the human kept rather than overturned. Reviewing some judge
+decisions (`scout findings review SLUG --all`, or the tab's state filter) is
+what fills this line in.
+
+Each scan's agreement line reports how many human-confirmed messages it cited
+and how many human-rejected messages it cited, restricted to the transcripts in
+that scan. Repeated sightings count once. Unreviewed exhibits do not enter these
+denominators. The derived view retains agreement per scan, using
+the current human verdicts.
+
+## Answers stay current
+
+`findings/SLUG/answer.md` refreshes after every scan that runs the finding's
+scanner, including scans that finish with errors such as refused requests (their
+failed transcripts count as partial coverage), resumed scans and scans explicitly
+marked complete. An interrupted scan refreshes when it is resumed. Answers also
+refresh after a review session ends and after every judge run, including one that
+appends zero verdicts.
+The report is replaced only after synthesis succeeds, so a failed synthesis
+leaves the previous report and its citations intact.
+
+The computed section includes existence within coverage, counts by label and
+source item, per-agent confirmed and proposed counts with coverage, review counts,
+agreement, the proposed exhibits awaiting review, and the confirmed exhibits,
+numbered `E1`, `E2`, …. With no confirmed exhibit the answer says how many proposed
+exhibits await review, or "None found within coverage" when there are none, without
+calling a model. Agents outside coverage are marked **not scanned**. Earliest
+evidence uses matching model-output event timestamps; when unavailable, the
+report provides an agent-local message-index fallback. Incomplete coverage and
+untimed evidence limit any claim about the earliest occurrence.
+
+The synthesis cites exhibit IDs such as `[E1]` and ends with an `ANSWER:` headline.
+It receives only located exhibits, each with the agent it comes from, and is
+instructed to name the agent of every exhibit it cites, to keep agents distinct,
+and to copy quotations exactly. Its citations are checked against the evidence
+set: a citation of an unknown or unlocated exhibit receives a visible `CHECK`
+marker, as does a number that is neither a computed fact nor present in an
+exhibit the sentence cites (numbers inside quotation marks or code are part of
+the quotation). These checks establish citation existence and numeric
+consistency, not semantic truth: review the cited exhibits to assess the model's
+interpretation.
+
+The synthesis and its evidence digest live in a metadata comment inside
+`answer.md`. An unchanged evidence set reuses synthesis without invoking the
+model, while computed sightings, coverage, and agreement are refreshed; a scan
+that only adds proposed exhibits therefore leaves the synthesis unchanged. Cached
+synthesis is checked again against the current facts. A change to the finding
+prompt, evidence, state, label, synthesis instructions, or synthesis model
+invalidates that reuse; rotating the nonce does not.
+
+## Findings tab
+
+`scout view` shows a **Findings** tab with each finding's status line, its
+rendered answer, the exhibits (filterable by state, agent and label), a context
+panel for the cited message, and a link that opens the message in the
+transcript view. Confirm, reject and relabel decisions there append
+human rows to `verdicts.jsonl` and refresh the computed report at once. Because
+reviewers record many decisions in a row, a decision does not call the model:
+the previous synthesis stays, with its citations renumbered and a note that the
+evidence has changed, until **Regenerate answer** (or a later scan, judge run or
+review session) synthesizes the current evidence. Unlocated exhibits cannot be
+confirmed there either.
+
+**Judge pending exhibits** runs `scout findings judge` on the finding's pending
+exhibits in one click and shows the run's counts and cost. Each exhibit's state
+names who decided it, such as `confirmed · human:reviewer`,
+`rejected · judge:anthropic/claude-haiku-5-5` or `proposed · finding scanner`, and
+a Confirm or Reject click on a judge-decided exhibit overrides the judge. The
+status line shows the last run's refusals and the judge agreement line.
+
+```bash
+scout findings answer unexpected-actions --no-synthesis
+scout findings answer unexpected-actions --model MODEL
+scout findings rotate-nonce
+```
+
+`answer` is an explicit override, not a required step after scanning or review.
+`--no-synthesis` writes only the computed report. Rotating the project nonce
+changes subsequent scanner rendering and therefore its generation cache key.
+Judge runs and synthesis use the finding model by default and incur their own model
+usage, separate from a scan's recorded `scan_model_usage`.

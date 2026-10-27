@@ -21,6 +21,7 @@ inspect-docs:
         - href: projects.qmd
         - href: results.qmd
         - href: validation.qmd
+        - href: findings.qmd
     - text: "Scanners"
       menu:
         - href: llm_scanner.qmd

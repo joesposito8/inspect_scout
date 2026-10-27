@@ -98,6 +98,7 @@ Architecture and design decisions in `/design/`.
 - [Multi-process concurrency](design/mp.md)
 - [Validation data structures](design/validation.md)
 - [Content trust (plain-text rendering of untrusted model output)](design/content-trust.md)
+- [Findings (standing questions answered from scan evidence)](design/findings.md)
 - [React Query patterns](src/inspect_scout/_view/ts-mono/apps/scout/design/react-query.md)
 - [Frontend specific testing](src/inspect_scout/_view/ts-mono/apps/scout/design/front-end-testing.md)
 

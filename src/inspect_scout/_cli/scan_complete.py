@@ -4,6 +4,7 @@ from typing_extensions import Unpack
 from inspect_scout._scan import scan_complete
 
 from .common import CommonOptions, common_options, process_common_options
+from .findings import print_scan_findings
 from .scan import scan_command
 
 
@@ -20,4 +21,5 @@ def scan_complete_command(
     # Process common options
     process_common_options(ctx, common)
 
-    scan_complete(scan_location, log_level=common["log_level"])
+    status = scan_complete(scan_location, log_level=common["log_level"])
+    print_scan_findings(status)

@@ -41,6 +41,8 @@ from rich.table import Column, Table
 from typing_extensions import Unpack
 
 from inspect_scout._concurrency._mp_common import set_log_level
+from inspect_scout._findings.scanner import add_finding_scanners
+from inspect_scout._findings.spec import FindingSelection, select_findings
 from inspect_scout._project import read_project
 from inspect_scout._scanjob import merge_project_into_scanjob
 from inspect_scout._scanner.metrics import metrics_accumulators
@@ -132,6 +134,9 @@ def scan(
     results_buffer: int | None = None,
     tags: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    findings: FindingSelection = None,
+    findings_model: str | None = None,
+    findings_bundle: bool = False,
     display: DisplayType | None = None,
     log_level: str | None = None,
     fail_on_error: bool = False,
@@ -167,6 +172,9 @@ def scan(
         results_buffer: Sync in-progress results to the scan location every N recorded results so they can be inspected while the scan is still running (defaults to None, which syncs results only on completion or interruption).
         tags: One or more tags for this scan.
         metadata: Metadata for this scan.
+        findings: Registered findings whose scanners join this scan: "all" or a list of finding slugs; `None` (the default) or "none" adds no findings.
+        findings_model: Model for the finding scanners (defaults to the project's findings model).
+        findings_bundle: Answer the selected findings together in one request per segment.
         display: Display type: "rich", "plain", "log", or "none" (defaults to "rich").
         log_level: Level for logging to the console: "debug", "http", "sandbox",
             "info", "warning", "error", "critical", or "notset" (defaults to "warning")
@@ -198,6 +206,9 @@ def scan(
             results_buffer=results_buffer,
             tags=tags,
             metadata=metadata,
+            findings=findings,
+            findings_model=findings_model,
+            findings_bundle=findings_bundle,
             log_level=log_level,
             fail_on_error=fail_on_error,
             dry_run=dry_run,
@@ -224,6 +235,9 @@ async def scan_async(
     results_buffer: int | None = None,
     tags: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    findings: FindingSelection = None,
+    findings_model: str | None = None,
+    findings_bundle: bool = False,
     log_level: str | None = None,
     fail_on_error: bool = False,
     dry_run: bool = False,
@@ -258,6 +272,9 @@ async def scan_async(
         results_buffer: Sync in-progress results to the scan location every N recorded results so they can be inspected while the scan is still running (defaults to None, which syncs results only on completion or interruption).
         tags: One or more tags for this scan.
         metadata: Metadata for this scan.
+        findings: Registered findings whose scanners join this scan: "all" or a list of finding slugs; `None` (the default) or "none" adds no findings.
+        findings_model: Model for the finding scanners (defaults to the project's findings model).
+        findings_bundle: Answer the selected findings together in one request per segment.
         log_level: Level for logging to the console: "debug", "http", "sandbox",
             "info", "warning", "error", "critical", or "notset" (defaults to "warning")
         fail_on_error: Re-raise exceptions instead of capturing them in results. Defaults to False.
@@ -291,6 +308,14 @@ async def scan_async(
     # worklist union, scanners union, validation union, tags union, metadata union,
     # generate_config merge)
     merge_project_into_scanjob(project, scanjob)
+    add_finding_scanners(
+        scanjob,
+        project,
+        select_findings(findings),
+        model=findings_model,
+        bundle=findings_bundle,
+        dry_run=dry_run,
+    )
 
     # Apply function parameter overrides on top of merged values
     if transcripts:
@@ -311,14 +336,22 @@ async def scan_async(
     if validation is not None:
         scanjob._validation = _resolve_validation(validation, scanjob)
 
+    # merge generate config first: batching requested via model_config (e.g.
+    # `scout scan --batch`) determines the default concurrency below
+    scanjob._generate_config = (
+        scanjob._generate_config.merge(model_config)
+        if scanjob._generate_config and model_config
+        else model_config or scanjob._generate_config or GenerateConfig()
+    )
+
     # initialize scan config
     scanjob._max_transcripts = (
         max_transcripts
         or scanjob._max_transcripts
         or (
-            DEFAULT_MAX_TRANSCRIPTS
-            if scanjob.generate_config is None or not scanjob.generate_config.batch
-            else DEFAULT_MAX_CONNECTIONS_BATCH
+            DEFAULT_MAX_CONNECTIONS_BATCH
+            if scanjob._generate_config.batch
+            else DEFAULT_MAX_TRANSCRIPTS
         )
     )
     scanjob._max_processes = max_processes or scanjob._max_processes
@@ -333,11 +366,6 @@ async def scan_async(
     scanjob._metadata = metadata or scanjob._metadata
 
     # derive max_connections if not specified
-    scanjob._generate_config = (
-        scanjob._generate_config.merge(model_config)
-        if scanjob._generate_config and model_config
-        else model_config or scanjob._generate_config or GenerateConfig()
-    )
     if scanjob._generate_config.max_connections is None:
         scanjob._generate_config.max_connections = scanjob._max_transcripts
 
@@ -499,6 +527,9 @@ async def scan_complete_async(
     # complete the scan
     status = await recorder_type.sync(scan_location, complete=True)
     display().scan_complete(status)
+    from inspect_scout._findings.lifecycle import finalize_findings
+
+    await finalize_findings(status)
     return status
 
 
@@ -541,6 +572,10 @@ async def _scan_async(
         _scan_async_running = False
 
     assert result is not None, "scan async did not return a result."
+
+    from inspect_scout._findings.lifecycle import finalize_findings
+
+    await finalize_findings(result)
 
     return result
 

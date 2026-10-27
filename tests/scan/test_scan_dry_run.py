@@ -3,6 +3,9 @@ import re
 
 import inspect_scout
 import pytest
+from inspect_ai._util.constants import DEFAULT_MAX_CONNECTIONS_BATCH
+from inspect_ai.model import GenerateConfig
+from inspect_scout._util.constants import DEFAULT_MAX_TRANSCRIPTS
 
 LOGS_DIR = (
     pathlib.Path(__file__).resolve().parent.parent / "recorder" / "logs"
@@ -39,3 +42,23 @@ def test_scan_dry_run_does_not_execute_scanners_or_create_results_dir(
     assert re.match(
         rf"|\s+dry_run_never_called\s+|\s+{limit:,}", capsys.readouterr().out
     )
+
+
+@pytest.mark.parametrize(
+    "batch,expected",
+    [(False, DEFAULT_MAX_TRANSCRIPTS), (True, DEFAULT_MAX_CONNECTIONS_BATCH)],
+)
+def test_batch_model_config_sets_default_concurrency(
+    tmp_path: pathlib.Path, batch: bool, expected: int
+) -> None:
+    # `scout scan --batch` passes batching through model_config, not the job.
+    status = inspect_scout.scan(
+        scanners=[dry_run_never_called_factory()],
+        transcripts=inspect_scout.transcripts_from(LOGS_DIR),
+        scans=str(tmp_path / "scans"),
+        model="mockllm/model",
+        model_config=GenerateConfig(batch=batch),
+        dry_run=True,
+        display="none",
+    )
+    assert status.spec.options.max_transcripts == expected

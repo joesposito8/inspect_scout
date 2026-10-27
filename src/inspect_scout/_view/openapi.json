@@ -123,6 +123,40 @@
         "title": "AdaptiveConcurrency",
         "type": "object"
       },
+      "Agreement": {
+        "description": "Message-level counts restricted to a scan's transcript population.",
+        "properties": {
+          "cited_rejected": {
+            "title": "Cited Rejected",
+            "type": "integer"
+          },
+          "found_confirmed": {
+            "title": "Found Confirmed",
+            "type": "integer"
+          },
+          "scan_id": {
+            "title": "Scan Id",
+            "type": "string"
+          },
+          "total_confirmed": {
+            "title": "Total Confirmed",
+            "type": "integer"
+          },
+          "total_rejected": {
+            "title": "Total Rejected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scan_id",
+          "found_confirmed",
+          "total_confirmed",
+          "cited_rejected",
+          "total_rejected"
+        ],
+        "title": "Agreement",
+        "type": "object"
+      },
       "AnchorEvent": {
         "description": "Marks a rollback-able point in a replayable trajectory.\n\nEmitted by an orchestrator immediately after a step it can later roll\nback to (a staged message, a model generate, etc.). Carries no content;\n``anchor_id`` is the addressable identifier that ``TimelineSpan.branched_from``\nreferences. Hidden from the viewer transcript by default.",
         "properties": {
@@ -227,6 +261,9 @@
               }
             ],
             "title": "Filter"
+          },
+          "findings": {
+            "$ref": "#/components/schemas/FindingsConfig"
           },
           "generate_config": {
             "anyOf": [
@@ -377,6 +414,18 @@
             ],
             "title": "Name"
           },
+          "nonce": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9]{8,}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonce"
+          },
           "project_dir": {
             "title": "Project Dir",
             "type": "string"
@@ -514,6 +563,7 @@
         "required": [
           "filter",
           "scans",
+          "findings",
           "home_dir",
           "project_dir"
         ],
@@ -2127,7 +2177,7 @@
         "type": "object"
       },
       "ContentReasoning": {
-        "description": "Reasoning content.\n\nSee the specification for [thinking blocks](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#understanding-thinking-blocks) for Claude models.",
+        "description": "Reasoning content.\n\nSee the specification for [thinking blocks](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) for Claude models.",
         "properties": {
           "internal": {
             "anyOf": [
@@ -2732,6 +2782,627 @@
           "calls"
         ],
         "title": "EventsData",
+        "type": "object"
+      },
+      "Exhibit": {
+        "description": "Evidence grouped by original message identity.",
+        "properties": {
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "message_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Index"
+          },
+          "message_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Label"
+          },
+          "model_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Ref"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "sightings": {
+            "items": {
+              "$ref": "#/components/schemas/Sighting"
+            },
+            "title": "Sightings",
+            "type": "array"
+          },
+          "state": {
+            "default": "proposed",
+            "enum": [
+              "proposed",
+              "confirmed",
+              "rejected"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "transcript_id": {
+            "title": "Transcript Id",
+            "type": "string"
+          },
+          "transcripts_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcripts Location"
+          },
+          "verdict_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict Reason"
+          },
+          "verification": {
+            "enum": [
+              "verified",
+              "relocated",
+              "unlocated"
+            ],
+            "title": "Verification",
+            "type": "string"
+          },
+          "verified_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Ref"
+          }
+        },
+        "required": [
+          "message_id",
+          "transcript_id",
+          "verification",
+          "quote",
+          "reason",
+          "state",
+          "sightings"
+        ],
+        "title": "Exhibit",
+        "type": "object"
+      },
+      "FindingContext": {
+        "description": "A bounded window around a located exhibit.",
+        "properties": {
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/FindingContextMessage"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "transcript_id": {
+            "title": "Transcript Id",
+            "type": "string"
+          },
+          "trust_content": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust Content"
+          }
+        },
+        "required": [
+          "message_id",
+          "transcript_id",
+          "messages"
+        ],
+        "title": "FindingContext",
+        "type": "object"
+      },
+      "FindingContextMessage": {
+        "description": "An original message and the text used for citation verification.",
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatMessageSystem"
+              },
+              {
+                "$ref": "#/components/schemas/ChatMessageUser"
+              },
+              {
+                "$ref": "#/components/schemas/ChatMessageAssistant"
+              },
+              {
+                "$ref": "#/components/schemas/ChatMessageTool"
+              }
+            ],
+            "title": "Message"
+          },
+          "rendered": {
+            "title": "Rendered",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "index",
+          "rendered"
+        ],
+        "title": "FindingContextMessage",
+        "type": "object"
+      },
+      "FindingDetail": {
+        "description": "Derived evidence with its materialized answer and navigation links.",
+        "properties": {
+          "agreements": {
+            "items": {
+              "$ref": "#/components/schemas/Agreement"
+            },
+            "title": "Agreements",
+            "type": "array"
+          },
+          "answer_markdown": {
+            "title": "Answer Markdown",
+            "type": "string"
+          },
+          "answer_stale": {
+            "title": "Answer Stale",
+            "type": "boolean"
+          },
+          "citation_messages": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Citation Messages",
+            "type": "object"
+          },
+          "coverage": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "enum": [
+                  "judged",
+                  "partial",
+                  "missing"
+                ],
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Coverage",
+            "type": "object"
+          },
+          "display_quotes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Display Quotes",
+            "type": "object"
+          },
+          "exhibits": {
+            "items": {
+              "$ref": "#/components/schemas/Exhibit"
+            },
+            "title": "Exhibits",
+            "type": "array"
+          },
+          "finding": {
+            "$ref": "#/components/schemas/FindingSpec"
+          },
+          "judge_agreement": {
+            "$ref": "#/components/schemas/JudgeAgreement"
+          },
+          "last_judge_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JudgeRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message_links": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Message Links",
+            "type": "object"
+          },
+          "scans": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scans",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FindingStatus"
+          }
+        },
+        "required": [
+          "finding",
+          "exhibits",
+          "coverage",
+          "scans",
+          "agreements",
+          "judge_agreement",
+          "status",
+          "answer_markdown",
+          "answer_stale",
+          "message_links",
+          "citation_messages",
+          "display_quotes"
+        ],
+        "title": "FindingDetail",
+        "type": "object"
+      },
+      "FindingJudgeRequest": {
+        "additionalProperties": false,
+        "description": "Options for judging a finding's pending exhibits.",
+        "properties": {
+          "limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "title": "FindingJudgeRequest",
+        "type": "object"
+      },
+      "FindingJudgeResponse": {
+        "description": "A recorded judge run, even when subsequent answer regeneration fails.",
+        "properties": {
+          "answer_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Error"
+          },
+          "run": {
+            "$ref": "#/components/schemas/JudgeRun"
+          },
+          "skipped_unlocated": {
+            "title": "Skipped Unlocated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run",
+          "skipped_unlocated"
+        ],
+        "title": "FindingJudgeResponse",
+        "type": "object"
+      },
+      "FindingReviewResponse": {
+        "description": "A saved decision, even when subsequent answer regeneration fails.",
+        "properties": {
+          "answer_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Error"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/VerdictRow"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "title": "FindingReviewResponse",
+        "type": "object"
+      },
+      "FindingSpec": {
+        "additionalProperties": false,
+        "description": "A standing question whose evidence is derived from project scans.",
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "prompt": {
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "prompt_sha": {
+            "default": "",
+            "title": "Prompt Sha",
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Slug",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "prompt",
+          "created",
+          "prompt_sha"
+        ],
+        "title": "FindingSpec",
+        "type": "object"
+      },
+      "FindingStatus": {
+        "description": "One status row for a standing question.",
+        "properties": {
+          "agreement": {
+            "title": "Agreement",
+            "type": "string"
+          },
+          "coverage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Coverage",
+            "type": "object"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "judge_agreement": {
+            "title": "Judge Agreement",
+            "type": "string"
+          },
+          "judge_refused": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Refused"
+          },
+          "sightings": {
+            "title": "Sightings",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "states": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "States",
+            "type": "object"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "states",
+          "sightings",
+          "coverage",
+          "agreement",
+          "judge_agreement",
+          "headline"
+        ],
+        "title": "FindingStatus",
+        "type": "object"
+      },
+      "FindingVerdictRequest": {
+        "additionalProperties": false,
+        "description": "A human decision; identity and append time are assigned by the server.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "message_id": {
+            "minLength": 1,
+            "title": "Message Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "Reviewed in Scout View",
+            "title": "Reason",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "confirmed",
+              "rejected"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "verdict",
+          "reason"
+        ],
+        "title": "FindingVerdictRequest",
+        "type": "object"
+      },
+      "FindingsConfig": {
+        "additionalProperties": false,
+        "description": "Project defaults for finding scanners.",
+        "properties": {
+          "context_window": {
+            "default": 100000,
+            "exclusiveMinimum": 0.0,
+            "title": "Context Window",
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "enum": [
+                "system",
+                "user",
+                "assistant",
+                "tool"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Messages",
+            "type": "array"
+          },
+          "model": {
+            "default": "anthropic/claude-haiku-5-5",
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "context_window",
+          "messages"
+        ],
+        "title": "FindingsConfig",
         "type": "object"
       },
       "GenerateConfig-Input": {
@@ -4843,6 +5514,113 @@
         "type": "object"
       },
       "JsonValue": {},
+      "JudgeAgreement": {
+        "description": "How the judge's decisions fared once a human reviewed them.",
+        "properties": {
+          "kept": {
+            "default": 0,
+            "title": "Kept",
+            "type": "integer"
+          },
+          "reviewed": {
+            "default": 0,
+            "title": "Reviewed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kept",
+          "reviewed"
+        ],
+        "title": "JudgeAgreement",
+        "type": "object"
+      },
+      "JudgeRun": {
+        "additionalProperties": false,
+        "description": "Counts from one judge run; refusals leave no verdict row, so they live here.",
+        "properties": {
+          "added": {
+            "format": "date-time",
+            "title": "Added",
+            "type": "string"
+          },
+          "candidates": {
+            "title": "Candidates",
+            "type": "integer"
+          },
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "integer"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "input_tokens_cache_read": {
+            "title": "Input Tokens Cache Read",
+            "type": "integer"
+          },
+          "input_tokens_cache_write": {
+            "title": "Input Tokens Cache Write",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "only": {
+            "enum": [
+              "proposed",
+              "all"
+            ],
+            "title": "Only",
+            "type": "string"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "refused": {
+            "title": "Refused",
+            "type": "integer"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "only",
+          "candidates",
+          "confirmed",
+          "rejected",
+          "refused",
+          "failed",
+          "input_tokens",
+          "input_tokens_cache_write",
+          "input_tokens_cache_read",
+          "output_tokens",
+          "added"
+        ],
+        "title": "JudgeRun",
+        "type": "object"
+      },
       "LlmScannerParams": {
         "description": "Parameters for llm_scanner.",
         "properties": {
@@ -6221,6 +6999,9 @@
             ],
             "title": "Filter"
           },
+          "findings": {
+            "$ref": "#/components/schemas/FindingsConfig"
+          },
           "generate_config": {
             "anyOf": [
               {
@@ -6366,6 +7147,18 @@
             ],
             "title": "Name"
           },
+          "nonce": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9]{8,}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonce"
+          },
           "results": {
             "anyOf": [
               {
@@ -6506,7 +7299,8 @@
           }
         },
         "required": [
-          "filter"
+          "filter",
+          "findings"
         ],
         "title": "ProjectConfig",
         "type": "object"
@@ -6528,6 +7322,9 @@
               }
             ],
             "title": "Filter"
+          },
+          "findings": {
+            "$ref": "#/components/schemas/FindingsConfig"
           },
           "generate_config": {
             "anyOf": [
@@ -6674,6 +7471,18 @@
             ],
             "title": "Name"
           },
+          "nonce": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9]{8,}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonce"
+          },
           "results": {
             "anyOf": [
               {
@@ -6814,7 +7623,8 @@
           }
         },
         "required": [
-          "filter"
+          "filter",
+          "findings"
         ],
         "title": "ProjectConfig",
         "type": "object"
@@ -10024,6 +10834,64 @@
         "title": "SentinelEvent",
         "type": "object"
       },
+      "Sighting": {
+        "description": "One scanner's observation of a message in one scan.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "model_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Refs",
+            "type": "array"
+          },
+          "result_uuid": {
+            "title": "Result Uuid",
+            "type": "string"
+          },
+          "scan_id": {
+            "title": "Scan Id",
+            "type": "string"
+          },
+          "scanner": {
+            "title": "Scanner",
+            "type": "string"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerifiedQuote"
+          }
+        },
+        "required": [
+          "scan_id",
+          "scanner",
+          "result_uuid",
+          "model_refs",
+          "verification"
+        ],
+        "title": "Sighting",
+        "type": "object"
+      },
       "SnapshotDetails": {
         "additionalProperties": true,
         "description": "Per-backup stats captured in the checkpoint file.\n\nOne per repo (host repo + one per active sandbox repo). Values come\nfrom restic's backup summary \u2014 see :class:`ResticBackupSummary`.",
@@ -11103,7 +11971,7 @@
         "type": "object"
       },
       "ToolEvent": {
-        "description": "Call to a tool.",
+        "description": "Call to a tool.\n\nA host tool that `sandbox_agent_bridge(bridged_tools=...)` runs for a\nsandboxed agent is recorded with `metadata[\"bridge\"]`: `server` and `tool`\n(the bridged server and the tool name within it, also the event's\n`function`), `function` (the name the model called it by, or `None`),\n`proposal_id` (the id of the model's proposing tool call, or `None`) and\n`grant` (`\"consumed\"` when a proposal matched, `\"denied\"` when the call\nwas refused for lack of one, `\"exempt\"` when a server registered with\n`require_proposal=False` ran it without one, or `None` when the request\nwas rejected before that check).",
         "properties": {
           "agent": {
             "anyOf": [
@@ -12860,6 +13728,133 @@
         "title": "ValidationSetSpec",
         "type": "object"
       },
+      "VerdictRow": {
+        "additionalProperties": false,
+        "description": "One decision; file order breaks ties within the same authority.",
+        "properties": {
+          "added": {
+            "format": "date-time",
+            "title": "Added",
+            "type": "string"
+          },
+          "decided_by": {
+            "pattern": "^(human|judge):.+$",
+            "title": "Decided By",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "message_id": {
+            "minLength": 1,
+            "title": "Message Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "manual",
+              "judge",
+              "recheck"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "confirmed",
+              "rejected",
+              "proposed"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "verdict",
+          "decided_by",
+          "reason",
+          "source",
+          "added"
+        ],
+        "title": "VerdictRow",
+        "type": "object"
+      },
+      "VerifiedQuote": {
+        "description": "The claimed and located positions of one quotation.",
+        "properties": {
+          "message_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Index"
+          },
+          "message_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Label"
+          },
+          "model_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Ref"
+          },
+          "status": {
+            "enum": [
+              "verified",
+              "relocated",
+              "unlocated"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "verified_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Ref"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "VerifiedQuote",
+        "type": "object"
+      },
       "Worklist": {
         "description": "List of transcript ids to process for a scanner.",
         "properties": {
@@ -12978,6 +13973,237 @@
         "summary": "Resolve dist directory",
         "tags": [
           "dist"
+        ]
+      }
+    },
+    "/findings": {
+      "get": {
+        "operationId": "findings_findings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FindingStatus"
+                  },
+                  "title": "Response Findings Findings Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Findings",
+        "tags": [
+          "findings"
+        ]
+      }
+    },
+    "/findings/{slug}": {
+      "get": {
+        "operationId": "finding_findings__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Finding",
+        "tags": [
+          "findings"
+        ]
+      }
+    },
+    "/findings/{slug}/answer": {
+      "post": {
+        "operationId": "answer_findings__slug__answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Answer",
+        "tags": [
+          "findings"
+        ]
+      }
+    },
+    "/findings/{slug}/context/{message_id}": {
+      "get": {
+        "operationId": "context_findings__slug__context__message_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "k",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "K",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Context",
+        "tags": [
+          "findings"
+        ]
+      }
+    },
+    "/findings/{slug}/judge": {
+      "post": {
+        "operationId": "judge_findings__slug__judge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindingJudgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingJudgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Judge",
+        "tags": [
+          "findings"
+        ]
+      }
+    },
+    "/findings/{slug}/verdicts": {
+      "post": {
+        "operationId": "verdict_findings__slug__verdicts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FindingVerdictRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Verdict",
+        "tags": [
+          "findings"
         ]
       }
     },

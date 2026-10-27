@@ -4,6 +4,7 @@ from typing_extensions import Unpack
 from inspect_scout._scan import scan_resume
 
 from .common import CommonOptions, common_options, process_common_options
+from .findings import print_scan_findings
 from .scan import scan_command
 
 
@@ -25,6 +26,8 @@ def scan_resume_command(
         log_level=common["log_level"],
         fail_on_error=common["fail_on_error"],
     )
+
+    print_scan_findings(status)
 
     # exit non-zero when the user asked us to fail on error and the scan
     # didn't complete cleanly

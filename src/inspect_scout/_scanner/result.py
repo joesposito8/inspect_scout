@@ -78,7 +78,15 @@ class Result(BaseModel, Generic[ParsedT]):
 
 
 def as_resultset(results: list[Result]) -> Result:
-    return Result(value=jsonable_python(results), type="resultset")
+    # jsonable_python drops None fields, but `value` is required: a None value
+    # (e.g. an unparsed segment) must survive so the item can be read back.
+    return Result(
+        value=[
+            {**jsonable_python(result), "value": jsonable_python(result.value)}
+            for result in results
+        ],
+        type="resultset",
+    )
 
 
 class Error(BaseModel):

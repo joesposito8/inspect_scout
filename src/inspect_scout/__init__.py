@@ -1,5 +1,9 @@
 from inspect_ai._util.deprecation import relocated_module_attribute
 
+from ._findings.derive import Exhibit
+from ._findings.links import view_url
+from ._findings.scanner import finding_scanner
+from ._findings.spec import FindingSpec
 from ._grep_scanner import grep_scanner
 from ._llm_scanner import (
     Answer,
@@ -14,6 +18,7 @@ from ._llm_scanner import (
     parse_answer,
     scanner_prompt,
 )
+from ._llm_scanner.rendering import ScannerRendering
 from ._observe import ObserveEmit, ObserveProvider, observe, observe_update
 from ._project import ProjectConfig
 from ._query.condition import Condition
@@ -107,6 +112,11 @@ except ImportError:
 
 
 __all__ = [
+    "view_url",
+    "Exhibit",
+    "finding_scanner",
+    "FindingSpec",
+    "ScannerRendering",
     # observe
     "observe",
     "observe_update",

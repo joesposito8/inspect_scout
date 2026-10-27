@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from .._query import UnknownColumnError
 from ._api_v2_config import create_config_router
 from ._api_v2_dist import create_dist_router
+from ._api_v2_findings import create_findings_router
 from ._api_v2_scanners import create_scanners_router
 from ._api_v2_scans import create_scans_router
 from ._api_v2_search import create_search_router
@@ -44,6 +45,7 @@ def v2_api_app(
 
     app.include_router(create_config_router(view_config=view_config))
     app.include_router(create_dist_router(dist_path=dist_path))
+    app.include_router(create_findings_router())
     app.include_router(create_topics_router())
     app.include_router(create_transcripts_router())
     app.include_router(create_scans_router(streaming_batch_size=streaming_batch_size))

@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 from inspect_scout import Result, Scanner, scan, scanner
+from inspect_scout._scanner.result import as_resultset
 from inspect_scout._scanresults import (
     _expand_resultset_rows,
     scan_results_db,
@@ -799,3 +800,16 @@ def test_resultset_expansion_handles_pyarrow_all_na_with_numeric_target() -> Non
     # Must not raise.
     result = _expand_resultset_rows(df)
     assert len(result) == 2
+
+
+def test_resultset_items_keep_a_none_value() -> None:
+    """An item whose value is None (e.g. an unparsed segment) can be read back."""
+    resultset = as_resultset(
+        [Result(value=None, explanation="unparsed"), Result(value=1)]
+    )
+    assert isinstance(resultset.value, list)
+    items = [Result.model_validate(item) for item in resultset.value]
+    assert [(item.value, item.explanation) for item in items] == [
+        (None, "unparsed"),
+        (1, None),
+    ]
